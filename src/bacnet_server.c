@@ -1,4 +1,13 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <getopt.h>
+#include <pthread.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <modbus.h>
+#include <errno.h>
 
 #include <libbacnet/address.h>
 #include <libbacnet/device.h>
@@ -34,6 +43,17 @@ static uint16_t test_data[] = {
     0xA4EC, 0x6E39, 0x8740, 0x1065, 0x9134, 0xFC8C };
 #define NUM_TEST_DATA (sizeof(test_data)/sizeof(test_data[0]))
 
+/* Linked list object (initial structure definition) */
+typedef struct s_word_object word_object;
+struct s_word_object {
+	char *word;
+	word_object *next;
+};
+
+static word_object *list_heads[NUM_LISTS];
+static pthread_mutex_t list_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t list_data_ready = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t list_data_flush = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t timer_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int Update_Analog_Input_Read_Property(
@@ -183,12 +203,113 @@ static void ms_tick(void) {
     bacnet_apdu_set_confirmed_handler(			\
 		    SERVICE_CONFIRMED_##service,	\
 		    bacnet_handler_##handler)
+		    
+static void add_to_list(word_object **list_head, char *word) {
+	word_object *last_object, *tmp_object;
+	char *tmp_string=strdup(word);
+	tmp_object = malloc(sizeof(word_object)); //create a new tmp_object
+	tmp_object->word = tmp_string;
+	tmp_object->next = NULL;
+	pthread_mutex_lock(&list_lock);
+	if (*list_head == NULL) { //initialisation of the first object
+		*list_head =tmp_object; //assigns the head of the list pointer to the tetmp object
+	} else {
+		last_object = *list_head; //set Last object pointer to the start of the structure
+		while (last_object->next) { //while the current objects next does not point to NULL
+			last_object = last_object->next; //change the last object pointer to the next object
+		}
+		last_object->next = tmp_object; //set the next pointer to the temp object
+		last_object=last_object->next;
+	}
+// last_object->word = tmp_string;
+// last_object->next = NULL;
+	pthread_mutex_unlock(&list_lock);
+	pthread_cond_signal(&list_data_ready);
+}
+
+static word_object *list_get_first(word_object **list_head) { //grabs the current header object and assigns the next object in the structure and the new heade
+	word_object *first_object;
+	first_object = *list_head; // grab the current list header
+	*list_head = (*list_head)->next; //set the next element as the list header
+	return first_object; //return the list header obtained above
+}
+
+static void *print_func(void *arg) {
+	word_object **list_head = (word_object **) arg;
+	word_object *current_object;
+	fprintf(stderr, "Print thread starting\n");
+	while(1) {
+		pthread_mutex_lock(&list_lock);
+		while (*list_head == NULL) {
+			pthread_cond_wait(&list_data_ready, &list_lock);
+		}
+		current_object = list_get_first(&list_heads[1]);//use the function to grab the next element of the list
+		pthread_mutex_unlock(&list_lock);
+		printf("%s\n", current_object->word); //print the word stored in the structure
+		free(current_object->word); //free the memorry location for the word object
+		free(current_object); //free the memory location for the current object
+		pthread_cond_signal(&list_data_flush);
+	}
+	/* Silence compiler warning */
+	return arg;
+}
+
+static void list_flush(word_object *list_head) {
+	pthread_mutex_lock(&list_lock);
+	while (list_head != NULL) {
+		pthread_cond_signal(&list_data_ready);
+		pthread_cond_wait(&list_data_flush, &list_lock);
+	}
+	pthread_mutex_unlock(&list_lock);
+}
+
+int modb(void){
+	int i;
+	int rc;
+	uint16_t tab_reg[128];
+	char sending[64];
+	modbus_t *ctx;
+	ctx = modbus_new_tcp("140.159.153.159", 502);
+	if (ctx == NULL) {
+		fprintf(stderr, "Unable to allocate libmodbus context\n");
+		return -1;
+	}
+	if (modbus_connect(ctx) == -1) {
+		printf("con failed");
+		fprintf(stderr, "Connection failed: %s\n", modbus_strerror(errno));
+		modbus_free(ctx);
+		return -1;
+	}
+	rc = modbus_read_registers(ctx, 12, 1, tab_reg);
+	if (rc == -1) {
+		fprintf(stderr, "%s\n", modbus_strerror(errno));
+		return -1;
+	}
+	for (i=0; i < rc; i++) {
+		sprintf(sending,"reg[%d]=%d (0x%X)", i, tab_reg[i], tab_reg[i]);
+		add_to_list(&list_heads[1], sending);
+		// printf("reg[%d]=%d (0x%X)\n", i, tab_reg[i], tab_reg[i]);
+	}
+	modbus_close(ctx);
+	modbus_free(ctx);
+	sleep(1);
+}
 
 int main(int argc, char **argv) {
+	int c;
+	int option_index = 0;
+	int count = -1;
+	int server = 0;
+	static struct option long_options[] = {
+		// {"count", required_argument, 0, 'c'},
+		// {"server", no_argument, 0, 's'},
+		{0, 0, 0, 0 }
+	};
+	
     uint8_t rx_buf[bacnet_MAX_MPDU];
     uint16_t pdu_len;
     BACNET_ADDRESS src;
-    pthread_t minute_tick_id, second_tick_id;
+    pthread_t print_thread, minute_tick_id, second_tick_id;
 
     bacnet_Device_Set_Object_Instance_Number(BACNET_INSTANCE_NO);
     bacnet_address_init();
@@ -208,7 +329,8 @@ int main(int argc, char **argv) {
     register_with_bbmd();
 
     bacnet_Send_I_Am(bacnet_Handler_Transmit_Buffer);
-
+    
+    pthread_create(&print_thread, NULL, print_func, &list_heads[1]);
     pthread_create(&minute_tick_id, 0, minute_tick, NULL);
     pthread_create(&second_tick_id, 0, second_tick, NULL);
     
@@ -223,8 +345,10 @@ int main(int argc, char **argv) {
      *	    Read the required number of registers from the modbus server
      *	    Store the register data into the tail of a linked list 
      */
+     
 
     while (1) {
+    	modb();
 	pdu_len = bacnet_datalink_receive(
 		    &src, rx_buf, bacnet_MAX_MPDU, BACNET_SELECT_TIMEOUT_MS);
 
