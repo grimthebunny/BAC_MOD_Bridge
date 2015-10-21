@@ -27,7 +27,7 @@
 #define BACNET_BBMD_TTL		    90
 #endif
 
-#define debug 0
+#define debug 0 
 
 static pthread_mutex_t timer_lock = PTHREAD_MUTEX_INITIALIZER;
 static int instance_no;
