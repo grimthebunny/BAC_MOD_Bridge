@@ -36,8 +36,8 @@
 
 #define NUM_LISTS 2
 
-
-uint16_t holding[3];
+/* global variable to hold contents retreived from linked list */
+//uint16_t holding[3];
 
 /* Linked list object (initial structure definition) */
 typedef struct s_word_object word_object;
@@ -46,13 +46,16 @@ struct s_word_object {
 	word_object *next;
 };
 
+/* Sets link list to be a series of linked lists */
 static word_object *list_heads[NUM_LISTS];
+
+/* setup of theread locking and signaling */
 static pthread_mutex_t list_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t list_data_ready = PTHREAD_COND_INITIALIZER;
 //static pthread_cond_t list_data_flush = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t timer_lock = PTHREAD_MUTEX_INITIALIZER;
 
-
+/*------------------------List related functions------------------------*/
 static word_object *list_get_first(word_object **list_head) { //grabs the current header object and assigns the next object in the structure and the new heade
         word_object *first_object;
 	first_object = *list_head; // grab the current list header
@@ -60,35 +63,41 @@ static word_object *list_get_first(word_object **list_head) { //grabs the curren
 	 return first_object; //return the list header obtained above
 }
 
-
-static int Update_Analog_Input_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata) {
-    word_object *current_object_0;	
-
-    int instance_no = bacnet_Analog_Input_Instance_To_Index(rpdata->object_instance);
-
-    if (rpdata->object_property != bacnet_PROP_PRESENT_VALUE) goto not_pv;
-   
-    pthread_mutex_lock(&list_lock); 
-    
-    if(list_heads[instance_no] == NULL){
-    	pthread_mutex_unlock(&list_lock);
-    	goto not_pv;
-    }
-
-    
-    current_object_0 = list_get_first(&list_heads[instance_no]);
-    holding[instance_no] = strtol(current_object_0->word, NULL, 16);
-    free(current_object_0);
-    pthread_mutex_unlock(&list_lock);
-    printf("AI_Present_Value request for instance %i. Data:%x\n", instance_no, holding[instance_no]);
-    bacnet_Analog_Input_Present_Value_Set(instance_no, holding[instance_no]);
-    
-not_pv:
- return bacnet_Analog_Input_Read_Property(rpdata);
-
+static void add_to_list(word_object **list_head, char *word) {
+	word_object *last_object, *tmp_object;
+	char *tmp_string=strdup(word);
+	tmp_object = malloc(sizeof(word_object)); //create a new tmp_object
+	tmp_object->word = tmp_string;
+	tmp_object->next = NULL;
+	pthread_mutex_lock(&list_lock);
+	if (*list_head == NULL) { //initialisation of the first object
+		*list_head =tmp_object; //assigns the head of the list pointer to the tetmp object
+	} else {
+		last_object = *list_head; //set Last object pointer to the start of the structure
+		while (last_object->next) { //while the current objects next does not point to NULL
+			last_object = last_object->next; //change the last object pointer to the next object
+		}
+		last_object->next = tmp_object; //set the next pointer to the temp object
+		last_object=last_object->next;
+	}
+	pthread_mutex_unlock(&list_lock);
+	pthread_cond_signal(&list_data_ready);
 }
 
 
+/*
+static void list_flush(word_object *list_head) {
+	pthread_mutex_lock(&list_lock);
+	while (list_head != NULL) {
+		pthread_cond_signal(&list_data_ready);
+		pthread_cond_wait(&list_data_flush, &list_lock);
+	}
+	pthread_mutex_unlock(&list_lock);
+}
+*/
+
+
+/*------------------------Bacnet Functions------------------------*/
 static bacnet_object_functions_t server_objects[] = {
     {bacnet_OBJECT_DEVICE,
 	    NULL,
@@ -208,54 +217,28 @@ static void ms_tick(void) {
 		    SERVICE_CONFIRMED_##service,	\
 		    bacnet_handler_##handler)
 		    
-static void add_to_list(word_object **list_head, char *word) {
-	word_object *last_object, *tmp_object;
-	char *tmp_string=strdup(word);
-	tmp_object = malloc(sizeof(word_object)); //create a new tmp_object
-	tmp_object->word = tmp_string;
-	tmp_object->next = NULL;
-	pthread_mutex_lock(&list_lock);
-	if (*list_head == NULL) { //initialisation of the first object
-		*list_head =tmp_object; //assigns the head of the list pointer to the tetmp object
-	} else {
-		last_object = *list_head; //set Last object pointer to the start of the structure
-		while (last_object->next) { //while the current objects next does not point to NULL
-			last_object = last_object->next; //change the last object pointer to the next object
-		}
-		last_object->next = tmp_object; //set the next pointer to the temp object
-		last_object=last_object->next;
-	}
-	pthread_mutex_unlock(&list_lock);
-	pthread_cond_signal(&list_data_ready);
-}
+/*------------------------Bridge Communication Functions------------------------*/
 
-
-/*
-static void list_flush(word_object *list_head) {
-	pthread_mutex_lock(&list_lock);
-	while (list_head != NULL) {
-		pthread_cond_signal(&list_data_ready);
-		pthread_cond_wait(&list_data_flush, &list_lock);
-	}
-	pthread_mutex_unlock(&list_lock);
-}
-*/
-
-
+/*function reads Modbus Data and adds to linked lists*/
 static void *modb(void *arg){
-	int i;
-	int rc;
-	uint16_t tab_reg[128];
-	char sending[64];
-	modbus_t *ctx;
-	ctx = modbus_new_tcp("140.159.153.159", 502);
-	//ctx = modbus_new_tcp("127.0.0.1", 502);
-	confailed:;
+	int i; //incrementing variable 
+	int rc; //number of items received from modbus
+	uint16_t tab_reg[128]; // storage for data from modbus request
+	char sending[64]; //storage value for sending data
+	modbus_t *ctx;  //reference to modbus connection
+	
+	//ctx = modbus_new_tcp("140.159.153.159", 502); //connects to remote server
+	ctx = modbus_new_tcp("127.0.0.1", 502); //connects to local server for testing
+	
+	/*modbus connection error checking*/
+	confailed:; //goto point for connection failures
+	
 	if (ctx == NULL) {
 		fprintf(stderr, "Unable to allocate libmodbus context\n");
 		sleep(1);
 		goto confailed;
 	}
+	
 	if (modbus_connect(ctx) == -1) {
 		printf("con failed");
 		fprintf(stderr, "Connection failed: %s\n", modbus_strerror(errno));
@@ -263,25 +246,60 @@ static void *modb(void *arg){
 		sleep(1);
 		goto confailed;
 	}
+
 while (1) {
-	regfailed:;
-	rc = modbus_read_registers(ctx, 12,1, tab_reg);
+	rc = modbus_read_registers(ctx, 12,1, tab_reg); //reads the data from modbus server 
+	
+	/* if it failed close connection and then reconnect*/
 	if (rc == -1) {
 		fprintf(stderr, "%s\n", modbus_strerror(errno));
-		goto regfailed;
+		modbus_close(ctx)
+		modbus_free(ctx);
+		usleep(100000);
+		goto confailed;
 	}
+	
+	/*add all items received in order to the head of the linked list*/
 	for (i=0; i < rc; i++) {
 		sprintf(sending, "%x", tab_reg[i]);
 		add_to_list(&list_heads[i], sending);
 	}
-	usleep(100000);
-}
 	
-
-	return arg;
-
+	usleep(100000); //wait for 100ms before next read
+}
+	return arg; //silences compiler warning
 }
 
+/* this function checks for BACNET requests and sends the data from the linked lists*/
+static int Update_Analog_Input_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata) {
+    word_object *current_object_0;	
+    uint16_t holding[3];
+    int instance_no = bacnet_Analog_Input_Instance_To_Index(rpdata->object_instance);
+
+    if (rpdata->object_property != bacnet_PROP_PRESENT_VALUE) goto not_pv;
+    
+    pthread_mutex_lock(&list_lock); 
+    
+    if(list_heads[instance_no] == NULL){
+    	pthread_mutex_unlock(&list_lock);
+    	goto not_pv;
+    }
+
+  
+    current_object_0 = list_get_first(&list_heads[instance_no]);
+    holding[instance_no] = strtol(current_object_0->word, NULL, 16);
+    free(current_object_0);
+    
+    pthread_mutex_unlock(&list_lock);
+    
+    printf("AI_Present_Value request for instance %i. Data:%x\n", instance_no, holding[instance_no]);
+    bacnet_Analog_Input_Present_Value_Set(instance_no, holding[instance_no]);
+    
+not_pv:
+ return bacnet_Analog_Input_Read_Property(rpdata);
+}
+
+/*------------------------Function Main------------------------*/
 int main(int argc, char **argv) {
 	
     uint8_t rx_buf[bacnet_MAX_MPDU];
