@@ -1,6 +1,25 @@
-Victoria University EES4100 Test Suite
+My application for the project component of EES4100
 
-This repository builds three applications:
+This application was built upon the ESS4100 Testbench application provided by Kim Taylor 
+located in the github repository kmtaylor/EES4100_Testbench. 
+
+The application uses code developed in grimthebunny/hello_world, the full history of the development of the 
+application can be seen between the two repositories
+
+The primary application is:
+
+bacnet_server:
+    The application (bacnet_server) is designed to form a bridge between a system sending Modbus data to a
+    system requiring BACNET messages. The system reads in new data from the Modbus server every second in 
+    a dedicated thread,the system responds to read property requests from the BACNET Client which occur 
+    approximatly once ever 100ms
+    
+    Data received from the Modbus server is stored in a linked list and is read out of this link list when 
+    a vaild read property request is received from the application and then sent to the client making the 
+    request.
+    
+    
+Local test clients for the Modbus server and BACNET client are also included in this repository: 
 
 bacnet_client:
     This application will continually poll for devices with subdirectories in
@@ -9,14 +28,6 @@ bacnet_client:
     by the data in the device's RANDOM_DATA_POOL.
 
     bacnet_client acts as a BBMD and expects register_with_bbmd requests.
-
-bacnet_server:
-    An incomplete implementation of a Modbus to BACnet bridge. (The modbus code
-    is missing completely). Use this as a basis for your project.
-
-    It is currently configured to send test_data (matching the data for device
-    12 in RANDOM_DATA_POOL) to demonstrate the matching requirements for
-    bacnet_client.
 
 modbus_server:
     The Modbus server that expects connections from bacnet_server. It will
