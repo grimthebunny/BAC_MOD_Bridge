@@ -98,6 +98,36 @@ static void list_flush(word_object *list_head) {
 
 
 /*------------------------Bacnet Functions------------------------*/
+
+/* this function checks for BACNET requests and sends the data from the linked lists*/
+static int Update_Analog_Input_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata) {
+    word_object *current_object_0;	
+    uint16_t holding[3];
+    int instance_no = bacnet_Analog_Input_Instance_To_Index(rpdata->object_instance);
+
+    if (rpdata->object_property != bacnet_PROP_PRESENT_VALUE) goto not_pv;
+    
+    pthread_mutex_lock(&list_lock); 
+    
+    if(list_heads[instance_no] == NULL){
+    	pthread_mutex_unlock(&list_lock);
+    	goto not_pv;
+    }
+
+  
+    current_object_0 = list_get_first(&list_heads[instance_no]);
+    holding[instance_no] = strtol(current_object_0->word, NULL, 16);
+    free(current_object_0);
+    
+    pthread_mutex_unlock(&list_lock);
+    
+    printf("AI_Present_Value request for instance %i. Data:%x\n", instance_no, holding[instance_no]);
+    bacnet_Analog_Input_Present_Value_Set(instance_no, holding[instance_no]);
+    
+not_pv:
+ return bacnet_Analog_Input_Read_Property(rpdata);
+}
+
 static bacnet_object_functions_t server_objects[] = {
     {bacnet_OBJECT_DEVICE,
 	    NULL,
@@ -218,7 +248,6 @@ static void ms_tick(void) {
 		    bacnet_handler_##handler)
 		    
 /*------------------------Bridge Communication Functions------------------------*/
-
 /*function reads Modbus Data and adds to linked lists*/
 static void *modb(void *arg){
 	int i; //incrementing variable 
@@ -253,7 +282,7 @@ while (1) {
 	/* if it failed close connection and then reconnect*/
 	if (rc == -1) {
 		fprintf(stderr, "%s\n", modbus_strerror(errno));
-		modbus_close(ctx)
+		modbus_close(ctx);
 		modbus_free(ctx);
 		usleep(100000);
 		goto confailed;
@@ -270,34 +299,6 @@ while (1) {
 	return arg; //silences compiler warning
 }
 
-/* this function checks for BACNET requests and sends the data from the linked lists*/
-static int Update_Analog_Input_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata) {
-    word_object *current_object_0;	
-    uint16_t holding[3];
-    int instance_no = bacnet_Analog_Input_Instance_To_Index(rpdata->object_instance);
-
-    if (rpdata->object_property != bacnet_PROP_PRESENT_VALUE) goto not_pv;
-    
-    pthread_mutex_lock(&list_lock); 
-    
-    if(list_heads[instance_no] == NULL){
-    	pthread_mutex_unlock(&list_lock);
-    	goto not_pv;
-    }
-
-  
-    current_object_0 = list_get_first(&list_heads[instance_no]);
-    holding[instance_no] = strtol(current_object_0->word, NULL, 16);
-    free(current_object_0);
-    
-    pthread_mutex_unlock(&list_lock);
-    
-    printf("AI_Present_Value request for instance %i. Data:%x\n", instance_no, holding[instance_no]);
-    bacnet_Analog_Input_Present_Value_Set(instance_no, holding[instance_no]);
-    
-not_pv:
- return bacnet_Analog_Input_Read_Property(rpdata);
-}
 
 /*------------------------Function Main------------------------*/
 int main(int argc, char **argv) {
