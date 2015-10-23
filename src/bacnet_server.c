@@ -20,7 +20,7 @@
 #include <libbacnet/ai.h>
 #include "bacnet_namespace.h"
 
-#define BACNET_INSTANCE_NO	    12
+#define BACNET_INSTANCE_NO	   80 
 #define BACNET_PORT		    0xBAC1
 #define BACNET_INTERFACE	    "lo"
 #define BACNET_DATALINK_TYPE	    "bvlc"
@@ -30,7 +30,7 @@
 #define RUN_AS_BBMD_CLIENT	    1
 #if RUN_AS_BBMD_CLIENT
 #define BACNET_BBMD_PORT	    0xBAC0
-#define BACNET_BBMD_ADDRESS	    "127.0.0.1"
+#define BACNET_BBMD_ADDRESS	    "140.159.160.7"
 #define BACNET_BBMD_TTL		    90
 #endif
 
@@ -256,9 +256,9 @@ static void *modb(void *arg){
 	char sending[64]; //storage value for sending data
 	modbus_t *ctx;  //reference to modbus connection
 	
-	//ctx = modbus_new_tcp("140.159.153.159", 502); //connects to remote server
-	ctx = modbus_new_tcp("127.0.0.1", 502); //connects to local server for testing
-	
+	ctx = modbus_new_tcp("140.159.153.159", 502); //connects to remote server
+	//ctx = modbus_new_tcp("127.0.0.1", 502); //connects to local server for testing
+	//ctx = modbus_new_tcp("140.159.168.154", 502);	//spare to connect to alternate server
 	/*modbus connection error checking*/
 	confailed:; //goto point for connection failures
 	
@@ -277,7 +277,7 @@ static void *modb(void *arg){
 	}
 
 while (1) {
-	rc = modbus_read_registers(ctx, 12,1, tab_reg); //reads the data from modbus server 
+	rc = modbus_read_registers(ctx, 80,3, tab_reg); //reads the data from modbus server 
 	
 	/* if it failed close connection and then reconnect*/
 	if (rc == -1) {
