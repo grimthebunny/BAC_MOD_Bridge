@@ -26,6 +26,10 @@
 #define BACNET_DATALINK_TYPE	    "bvlc"
 #define BACNET_SELECT_TIMEOUT_MS    1	    /* ms */
 
+#define MODBUS_ADDRESS	    "140.159.153.159"
+#define MODBUS_PORT	    502
+#define MODBUS_FIRST_DEVICE  80
+#define NUM_LISTS 2
 
 #define RUN_AS_BBMD_CLIENT	    1
 #if RUN_AS_BBMD_CLIENT
@@ -34,7 +38,7 @@
 #define BACNET_BBMD_TTL		    90
 #endif
 
-#define NUM_LISTS 2
+
 
 /* global variable to hold contents retreived from linked list */
 //uint16_t holding[3];
@@ -256,9 +260,9 @@ static void *modb(void *arg){
 	char sending[64]; //storage value for sending data
 	modbus_t *ctx;  //reference to modbus connection
 	confailed:;	
-	ctx = modbus_new_tcp("140.159.153.159", 502); //connects to remote server
-	//ctx = modbus_new_tcp("127.0.0.1", 502); //connects to local server for testing
-	//ctx = modbus_new_tcp("140.159.168.154", 502);	//spare to connect to alternate server
+	ctx = modbus_new_tcp(MODBUS_ADDRESS, MODBUS_PORT); //connects to remote server
+	
+	
 	/*modbus connection error checking*/
 	
 	if (ctx == NULL) {
@@ -276,7 +280,7 @@ static void *modb(void *arg){
 	}
 
 while (1) {
-	rc = modbus_read_registers(ctx, 80,3, tab_reg); //reads the data from modbus server 
+	rc = modbus_read_registers(ctx, MODBUS_FIRST_DEVICE, NUM_LISTS+1, tab_reg); //reads the data from modbus server 
 	
 	/* if it failed close connection and then reconnect*/
 	if (rc == -1) {
