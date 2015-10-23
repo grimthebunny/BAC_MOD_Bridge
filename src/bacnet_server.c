@@ -255,12 +255,11 @@ static void *modb(void *arg){
 	uint16_t tab_reg[128]; // storage for data from modbus request
 	char sending[64]; //storage value for sending data
 	modbus_t *ctx;  //reference to modbus connection
-	
+	confailed:;	
 	ctx = modbus_new_tcp("140.159.153.159", 502); //connects to remote server
 	//ctx = modbus_new_tcp("127.0.0.1", 502); //connects to local server for testing
 	//ctx = modbus_new_tcp("140.159.168.154", 502);	//spare to connect to alternate server
 	/*modbus connection error checking*/
-	confailed:; //goto point for connection failures
 	
 	if (ctx == NULL) {
 		fprintf(stderr, "Unable to allocate libmodbus context\n");
